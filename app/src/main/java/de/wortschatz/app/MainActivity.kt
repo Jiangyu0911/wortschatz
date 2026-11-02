@@ -2,6 +2,7 @@ package de.wortschatz.app
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -14,7 +15,12 @@ import de.wortschatz.app.ui.WortschatzApp
 import de.wortschatz.app.ui.theme.WortschatzTheme
 
 class MainActivity : ComponentActivity() {
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        // 交给系统在第一帧后自动撤掉启动图。
+        // 早前用 setKeepOnScreenCondition 等一个「首帧已画」的标记，
+        // 结果那条条件永远等不到（界面还没开始绘制就不会再有下一帧），会一直卡在启动图。
+        installSplashScreen()
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         setContent {

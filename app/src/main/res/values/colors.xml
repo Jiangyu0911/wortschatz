@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#FF1B2A4A</color>
+    <!-- 启动画面底色，与图标背景一致 -->
+    <color name="splash_background">#FF1B2A4A</color>
 </resources>

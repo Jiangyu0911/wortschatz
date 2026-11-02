@@ -6,4 +6,10 @@
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowBackground">#FFFDFCFF</item>
     </style>
+    <!-- 冷启动窗口：系统直接画品牌底色与图标，不再先出白屏 -->
+    <style name="Theme.Wortschatz.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="postSplashScreenTheme">@style/Theme.Wortschatz</item>
+    </style>
 </resources>
