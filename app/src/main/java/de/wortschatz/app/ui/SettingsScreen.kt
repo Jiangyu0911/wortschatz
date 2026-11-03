@@ -360,6 +360,37 @@ fun SettingsScreen(
             }
         }
 
+        // ---------------- 撤销
+        item {
+            SettingCard(title = "撤销") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "摇一摇手机撤销",
+                            fontSize = 13.5.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = "摇一下手机弹出确认框，确认后回退刚才那一步" +
+                                "（${AppViewModel.UNDO_TTL_MS / 1000} 秒内有效）",
+                            fontSize = 11.5.sp,
+                            lineHeight = 17.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = vm.shakeUndoEnabled,
+                        onCheckedChange = { vm.updateShakeUndo(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                            checkedTrackColor = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                }
+            }
+        }
+
         // ---------------- 复数显示
         item {
             SettingCard(title = "名词复数") {
@@ -698,7 +729,7 @@ fun SettingsScreen(
                     Spacer(Modifier.width(8.dp))
                     Column {
                         Text(
-                            text = "德语单词 Wortschatz 1.30",
+                            text = "德语单词 Wortschatz 1.31",
                             fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurface
                         )

@@ -25,6 +25,7 @@ import de.wortschatz.app.data.WordWithProgress
 import de.wortschatz.app.tts.Speaker
 import kotlin.random.Random
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -74,6 +75,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** 供界面直接使用的复数展示方式 */
     val pluralStyle: PluralStyle
         get() = if (pluralSuffixOnly) PluralStyle.SUFFIX else PluralStyle.FULL
+
+    /** 摇一摇撤销：默认开启。关掉后没有任何撤销入口（原来那条提示条已移除） */
+    var shakeUndoEnabled by mutableStateOf(prefs.getBoolean(KEY_SHAKE_UNDO, true))
+        private set
 
     // ---- 查词
     var query by mutableStateOf("")
@@ -136,28 +141,43 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var undoLabel by mutableStateOf<String?>(null)
         private set
     private var undoRestore: (() -> Unit)? = null
+    private var undoExpireJob: Job? = null
 
     /**
      * 登记一步可撤销操作。
      *
      * 只保留最近一步：连续操作时，旧的那步自然失效——这符合「撤销上一步」的直觉，
      * 也避免维护一整个历史栈带来的状态不一致。
+     *
+     * 撤销改成「摇一摇」后界面上不再有提示条，所以给一个有效期：
+     * 过期即失效，避免几分钟后摇一下手机把早已翻篇的操作回退掉
+     * （此时快照里的队列状态早已不是当前状态）。
      */
     private fun offerUndo(label: String, restore: () -> Unit) {
         undoRestore = restore
         undoLabel = label
+        undoExpireJob?.cancel()
+        undoExpireJob = viewModelScope.launch {
+            delay(UNDO_TTL_MS)
+            undoRestore = null
+            undoLabel = null
+        }
     }
 
     fun undo() {
         val restore = undoRestore
         undoRestore = null
         undoLabel = null
+        undoExpireJob?.cancel()
+        undoExpireJob = null
         restore?.invoke()
     }
 
     fun clearUndo() {
         undoRestore = null
         undoLabel = null
+        undoExpireJob?.cancel()
+        undoExpireJob = null
     }
 
     private class StudySnapshot(
@@ -788,6 +808,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         spellInput = ""
         spellChecked = false
         spellLastCorrect = false
+        // 退出拼写后队列已经清空，再拿旧快照恢复会得到一个空测试，撤销一并作废
+        clearUndo()
     }
 
     // ---------------------------------------------------------------- 学习记录
@@ -984,6 +1006,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun updatePluralSuffixOnly(v: Boolean) {
         pluralSuffixOnly = v
         prefs.edit().putBoolean(KEY_PLURAL_SUFFIX, v).apply()
+    }
+
+    fun updateShakeUndo(v: Boolean) {
+        shakeUndoEnabled = v
+        prefs.edit().putBoolean(KEY_SHAKE_UNDO, v).apply()
+    }
+
+    /** 「摇一摇可以撤销」的提示只弹一次，别每次操作都提醒 */
+    fun shakeHintShown(): Boolean = prefs.getBoolean(KEY_SHAKE_HINT, false)
+
+    fun markShakeHintShown() {
+        prefs.edit().putBoolean(KEY_SHAKE_HINT, true).apply()
     }
 
     fun updateAutoSpeak(v: Boolean) {
@@ -1293,6 +1327,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         /** 一个词需要连续认识多少次才算通过 */
         const val PASS_STREAK = 3
 
+        /**
+         * 撤销的有效期。
+         *
+         * 界面上不再显示撤销条，用户没有「还剩几秒」的视觉提示，
+         * 这里取一个足够宽裕的值：来得及反应过来摇一摇，又不会久到快照过期。
+         */
+        const val UNDO_TTL_MS = 45_000L
+
         private const val PREFS_NAME = "wortschatz_prefs"
         private const val KEY_LEVELS = "levels"
         private const val KEY_SESSION_SIZE = "session_size"
@@ -1301,6 +1343,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         private const val KEY_THEME = "theme_mode"
         private const val KEY_SPELL_TEST = "spell_test"
         private const val KEY_PLURAL_SUFFIX = "plural_suffix_only"
+        private const val KEY_SHAKE_UNDO = "shake_undo"
+        private const val KEY_SHAKE_HINT = "shake_undo_hint"
         private const val KEY_BOOKS = "custom_books"
         private const val KEY_SEARCH_HISTORY = "search_history"
         private const val HISTORY_SEP = "\u001F"

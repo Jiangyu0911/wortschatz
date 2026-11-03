@@ -71,13 +71,17 @@ private data class TabItem(
 
 @Composable
 fun WortschatzApp(vm: AppViewModel) {
-    // 加载结束时不直接「啪」地切走，与主界面做一次淡入淡出
-    Crossfade(
-        targetState = vm.initializing,
-        animationSpec = tween(durationMillis = 380, easing = FastOutSlowInEasing),
-        label = "splash"
-    ) { loading ->
-        if (loading) Splash() else MainScaffold(vm)
+    Box(modifier = Modifier.fillMaxSize()) {
+        // 加载结束时不直接「啪」地切走，与主界面做一次淡入淡出
+        Crossfade(
+            targetState = vm.initializing,
+            animationSpec = tween(durationMillis = 380, easing = FastOutSlowInEasing),
+            label = "splash"
+        ) { loading ->
+            if (loading) Splash() else MainScaffold(vm)
+        }
+        // 摇一摇撤销：弹窗是独立 Window，放在最外层才能覆盖学习页、拼写页等全屏页面
+        ShakeUndoHost(vm)
     }
 }
 
@@ -182,12 +186,11 @@ private fun MainScaffold(vm: AppViewModel) {
             }
         }
     ) { padding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            Box(modifier = Modifier.weight(1f)) {
             Crossfade(targetState = tab, label = "tab") { current ->
                 when (current) {
                     0 -> HomeScreen(
@@ -219,10 +222,7 @@ private fun MainScaffold(vm: AppViewModel) {
                         onOpenBook = { showBook = true }
                     )
                 }
-                }
             }
-            // 收藏等操作的撤销条：贴在底部导航栏上方，占据布局不遮挡列表
-            UndoBar(vm)
         }
     }
 }
