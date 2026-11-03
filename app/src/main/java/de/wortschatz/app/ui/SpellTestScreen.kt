@@ -138,12 +138,18 @@ private fun SpellQuestion(vm: AppViewModel, word: Word, modifier: Modifier = Mod
         if (vm.spellChecked) runCatching { focusRequester.requestFocus() }
     }
 
+    val scrollState = rememberScrollState()
+    // 反馈显示在顶部：判定后把视图拉回顶部，保证一眼能看到对错
+    LaunchedEffect(vm.spellChecked) {
+        if (vm.spellChecked) runCatching { scrollState.animateScrollTo(0) }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
             // 键盘弹起后可用高度会明显变小，内容改为可滚动：
             // 否则会溢出到底部的撤销条下面，按钮被压住点不到
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
             .padding(horizontal = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -181,6 +187,17 @@ private fun SpellQuestion(vm: AppViewModel, word: Word, modifier: Modifier = Mod
                 onClick = {
                     if (vm.spellChecked) vm.nextSpelling() else vm.checkSpelling()
                 }
+            )
+        }
+
+        // 判定结果放在顶部：键盘弹起时下方区域会被挡住，只有这里一定可见
+        if (vm.spellChecked) {
+            Spacer(Modifier.height(8.dp))
+            SpellFeedback(
+                word = word,
+                correct = vm.spellLastCorrect,
+                pluralNote = word.pluralNote(vm.pluralStyle),
+                onSpeak = { vm.speakWord(word) }
             )
         }
 
@@ -234,7 +251,10 @@ private fun SpellQuestion(vm: AppViewModel, word: Word, modifier: Modifier = Mod
             ),
             shape = RoundedCornerShape(14.dp),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { vm.checkSpelling() }),
+            keyboardActions = KeyboardActions(onDone = {
+                // 回车即提交；已判定时再按回车继续下一题
+                if (vm.spellChecked) vm.nextSpelling() else vm.checkSpelling()
+            }),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = MaterialTheme.colorScheme.primary,
                 unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
@@ -274,54 +294,65 @@ private fun SpellQuestion(vm: AppViewModel, word: Word, modifier: Modifier = Mod
             color = MaterialTheme.colorScheme.outline
         )
 
-        if (vm.spellChecked) {
-            Spacer(Modifier.height(12.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = if (vm.spellLastCorrect) Icons.Rounded.Check
-                    else Icons.Rounded.Close,
-                    contentDescription = null,
-                    modifier = Modifier.size(17.dp),
-                    tint = if (vm.spellLastCorrect) ExtraColors.success
-                    else MaterialTheme.colorScheme.error
-                )
-                Spacer(Modifier.width(5.dp))
+        Spacer(Modifier.height(10.dp))
+    }
+}
+
+/**
+ * 顶部反馈横幅：正确显示「拼写正确」，错误直接给正确答案，并可朗读。
+ * 放在页面上方而不是输入框下方——键盘弹起后下方会被遮挡。
+ */
+@Composable
+private fun SpellFeedback(
+    word: Word,
+    correct: Boolean,
+    pluralNote: String?,
+    onSpeak: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = if (correct) ExtraColors.successContainer
+        else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f)
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = if (correct) Icons.Rounded.Check else Icons.Rounded.Close,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = if (correct) ExtraColors.success else MaterialTheme.colorScheme.error
+            )
+            Spacer(Modifier.width(8.dp))
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = if (vm.spellLastCorrect) "拼写正确"
-                    else "正确答案：${SpellTest.answerOf(word)}",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = if (vm.spellLastCorrect) ExtraColors.success
-                    else MaterialTheme.colorScheme.error
+                    text = if (correct) "拼写正确" else "正确答案：${SpellTest.answerOf(word)}",
+                    fontFamily = FontFamily.Default,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (correct) ExtraColors.success else MaterialTheme.colorScheme.error
                 )
-                Spacer(Modifier.width(8.dp))
-                IconButton(
-                    onClick = { vm.speakWord(word) },
-                    modifier = Modifier.size(30.dp)
-                ) {
-                    Icon(
-                        Icons.Rounded.VolumeUp,
-                        contentDescription = "朗读",
-                        modifier = Modifier.size(17.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                pluralNote?.let { note ->
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = note,
+                        fontFamily = FontFamily.Default,
+                        fontSize = 12.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
-            // 拼错时顺带把复数一起复习，避免只记住单数
-            word.pluralNote(vm.pluralStyle)?.let { note ->
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = note,
-                    fontFamily = FontFamily.Default,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+            IconButton(onClick = onSpeak, modifier = Modifier.size(32.dp)) {
+                Icon(
+                    Icons.Rounded.VolumeUp,
+                    contentDescription = "朗读",
+                    modifier = Modifier.size(17.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-
         }
-
-        Spacer(Modifier.height(10.dp))
     }
 }
 
