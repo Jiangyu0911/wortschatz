@@ -25,6 +25,7 @@ import de.wortschatz.app.data.WordWithProgress
 import de.wortschatz.app.tts.Speaker
 import kotlin.random.Random
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -237,6 +238,34 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** 被跳过的词数 */
     var spellSkipped by mutableStateOf(0)
         private set
+
+    /**
+     * 上一次判定完成的时间戳。
+     *
+     * 提交与「下一题」是同一个按钮：连点两下时，第二下会把刚提交的词直接翻过去，
+     * 用户看不到正确答案——表现就是「有时候会跳过单词」。
+     */
+    private var spellCheckedAt = 0L
+
+    /** 判定后到允许翻页的最短间隔（毫秒） */
+    private val advanceGuardMs = 600L
+
+    /**
+     * 当前是否可以翻到下一题。
+     *
+     * 判定后先禁用一小段时间再放开：既挡住连点，也让界面上能看出「按钮刚出现」。
+     * 跳过也受它约束，避免连点一次跳过两个词。
+     */
+    var spellCanAdvance by mutableStateOf(true)
+        private set
+
+    private fun armAdvance(delayMs: Long = 600L) {
+        spellCanAdvance = false
+        viewModelScope.launch {
+            delay(delayMs)
+            spellCanAdvance = true
+        }
+    }
 
     /**
      * 待拼写队列：拼错的词会挪到队尾重测，直到拼对。
@@ -657,6 +686,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         spellInput = ""
         spellChecked = false
         spellLastCorrect = false
+        spellCanAdvance = true
     }
 
     fun onSpellInput(text: String) {
@@ -687,15 +717,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         spellSkipped = s.skipped
         spellFailed.clear()
         spellFailed.addAll(s.failed)
+        spellCanAdvance = true
     }
 
     fun checkSpelling() {
         if (spellChecked) return
+        // 空输入不判定：误触「检查」不该把一个词记成答错
+        if (spellInput.isBlank()) return
         val w = spellWord ?: return
         val snapshot = spellSnapshot()
         val ok = SpellTest.matches(spellInput, w)
         spellLastCorrect = ok
         spellChecked = true
+        spellCheckedAt = System.currentTimeMillis()
         spellAttempts++
         if (ok) {
             spellPassed++
@@ -703,12 +737,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         } else {
             spellFailed.add(w.id)
         }
+        armAdvance()
         offerUndo("提交了「${spellInput.ifBlank { "空答案" }}」") { restoreSpell(snapshot) }
     }
 
     /** 提交后推进：拼对的出队，拼错的挪到队尾稍后重测 */
     fun nextSpelling() {
         if (!spellChecked) return
+        // 判定后短时间内忽略翻页：挡住连点造成的「没看到答案就跳下一题」
+        if (!spellCanAdvance) return
         val w = spellQueue.firstOrNull() ?: return
         val snapshot = spellSnapshot()
         if (spellLastCorrect) {
@@ -727,6 +764,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** 跳过当前词：不计入通过，直接出队，结果页会统计跳过数量 */
     fun skipSpelling() {
         if (spellQueue.isEmpty()) return
+        // 同样上锁：连点会一次跳过两个词
+        if (!spellCanAdvance) return
         val snapshot = spellSnapshot()
         val skippedWord = spellWord?.word ?: ""
         spellSkipped++
@@ -734,6 +773,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         spellInput = ""
         spellChecked = false
         spellLastCorrect = false
+        armAdvance()
         offerUndo("跳过了「$skippedWord」") { restoreSpell(snapshot) }
     }
 

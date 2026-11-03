@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -139,6 +141,9 @@ private fun SpellQuestion(vm: AppViewModel, word: Word, modifier: Modifier = Mod
     Column(
         modifier = modifier
             .fillMaxSize()
+            // 键盘弹起后可用高度会明显变小，内容改为可滚动：
+            // 否则会溢出到底部的撤销条下面，按钮被压住点不到
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -161,34 +166,22 @@ private fun SpellQuestion(vm: AppViewModel, word: Word, modifier: Modifier = Mod
                 )
             }
             Spacer(Modifier.weight(1f))
-            val inputEmpty = vm.spellInput.isBlank() && !vm.spellChecked
-            Surface(
-                modifier = Modifier
-                    .height(40.dp)
-                    .widthIn(min = 112.dp),
-                shape = RoundedCornerShape(12.dp),
-                color = if (inputEmpty) MaterialTheme.colorScheme.surfaceVariant
-                else MaterialTheme.colorScheme.primary,
+            // 判定后这里**不再放按钮**：「下一题」移到反馈区。
+            // 否则「检查」和「下一题」占同一个位置，连点两下会把刚提交的词直接翻过去，
+            // 用户看不到正确答案——表现就是「有时候会跳过单词」。
+            SpellActionButton(
+                text = when {
+                    !vm.spellChecked -> "检查"
+                    vm.spellLastCorrect && vm.spellRemaining <= 1 -> "查看结果"
+                    vm.spellLastCorrect -> "下一题"
+                    else -> "继续测试"
+                },
+                // 未判定时按输入是否为空决定；判定后先禁用 600ms，挡住连点误跳过
+                enabled = if (vm.spellChecked) vm.spellCanAdvance else vm.spellInput.isNotBlank(),
                 onClick = {
                     if (vm.spellChecked) vm.nextSpelling() else vm.checkSpelling()
                 }
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        text = when {
-                            !vm.spellChecked -> "检查"
-                            vm.spellLastCorrect && vm.spellRemaining <= 1 -> "查看结果"
-                            vm.spellLastCorrect -> "下一题"
-                            else -> "继续测试"
-                        },
-                        modifier = Modifier.padding(horizontal = 22.dp),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = if (inputEmpty) MaterialTheme.colorScheme.onSurfaceVariant
-                        else MaterialTheme.colorScheme.onPrimary
-                    )
-                }
-            }
+            )
         }
 
         Spacer(Modifier.height(10.dp))
@@ -204,7 +197,7 @@ private fun SpellQuestion(vm: AppViewModel, word: Word, modifier: Modifier = Mod
             PosChip(word.posLabel)
         }
 
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(20.dp))
 
         Text(
             text = word.zh,
@@ -325,10 +318,35 @@ private fun SpellQuestion(vm: AppViewModel, word: Word, modifier: Modifier = Mod
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+
         }
 
-        Spacer(Modifier.weight(1f))
         Spacer(Modifier.height(10.dp))
+    }
+}
+
+/** 拼写页的主按钮，检查与翻页共用同一套样式 */
+@Composable
+private fun SpellActionButton(text: String, enabled: Boolean, onClick: () -> Unit) {
+    Surface(
+        modifier = Modifier
+            .height(40.dp)
+            .widthIn(min = 112.dp),
+        shape = RoundedCornerShape(12.dp),
+        color = if (enabled) MaterialTheme.colorScheme.primary
+        else MaterialTheme.colorScheme.surfaceVariant,
+        onClick = { if (enabled) onClick() }
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                text = text,
+                modifier = Modifier.padding(horizontal = 22.dp),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                color = if (enabled) MaterialTheme.colorScheme.onPrimary
+                else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 
