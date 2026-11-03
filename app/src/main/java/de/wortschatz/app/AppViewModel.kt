@@ -200,6 +200,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var importError by mutableStateOf<String?>(null)
         private set
+    /** 非致命提示，比如多张图里有一张没认出来；不影响其余结果 */
+    var importNotice by mutableStateOf<String?>(null)
+        private set
+    /** 本次已成功识别的图片张数 */
+    var importPhotoCount by mutableStateOf(0)
+        private set
+
+    /**
+     * 累计的词元：多张图片会依次识别，结果按张数顺序合并去重，
+     * 最后一次性匹配词库——这样顺序稳定，也不会因重复出现同一词而出现多行。
+     */
+    private val scannedTokens = mutableListOf<String>()
+    private val scannedStops = mutableSetOf<String>()
 
     // ---- 拼写测试
     var spellActive by mutableStateOf(false)
@@ -963,16 +976,46 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * 同名书已存在时复用，避免反复导入产生一堆同名词书。
      */
     /** 识别一张图片里的德语词，并匹配本地词库 */
-    fun recognizePhoto(uri: android.net.Uri) {
+    fun recognizePhoto(uri: android.net.Uri) = recognizePhotos(listOf(uri))
+
+    /**
+     * 识别一张或多张图片。
+     *
+     * @param replace true 表示丢弃之前的识别结果重新开始（第一次选图）；
+     *                false 表示把这一批的结果追加到已有结果后面（继续拍照 / 再选几张）。
+     */
+    fun recognizePhotos(uris: List<android.net.Uri>, replace: Boolean = false) {
+        if (uris.isEmpty()) return
         viewModelScope.launch {
             importLoading = true
             importError = null
-            runCatching {
-                withContext(Dispatchers.IO) { PhotoOcr.recognize(getApplication(), uri) }
-            }.onSuccess { scan ->
-                applyScan(scan.tokens, scan.stops)
-            }.onFailure { e ->
-                failImport(e.message ?: "识别失败，换一张更清晰的图片试试")
+            importNotice = null
+            if (replace) {
+                scannedTokens.clear()
+                scannedStops.clear()
+                importPhotoCount = 0
+            }
+            var failed = 0
+            uris.forEach { uri ->
+                runCatching {
+                    withContext(Dispatchers.IO) { PhotoOcr.recognize(getApplication(), uri) }
+                }.onSuccess { scan ->
+                    importPhotoCount++
+                    scan.tokens.forEach { term -> if (term !in scannedTokens) scannedTokens.add(term) }
+                    scannedStops.addAll(scan.stops)
+                }.onFailure {
+                    failed++
+                }
+            }
+
+            if (scannedTokens.isEmpty()) {
+                failImport(
+                    if (failed > 0) "有 $failed 张图片识别失败，换更清晰的图片试试"
+                    else "没有识别到德语单词，换一张更清晰的图片试试"
+                )
+            } else {
+                applyScan(scannedTokens.toList(), scannedStops.toSet())
+                if (failed > 0) importNotice = "有 $failed 张图片未能识别，已跳过"
             }
             importLoading = false
         }
@@ -988,7 +1031,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             importLoading = true
             importError = null
-            applyScan(scan.tokens, scan.stops)
+            importNotice = null
+            // 文本导入不与图片结果混在一起
+            scannedTokens.clear()
+            scannedTokens.addAll(scan.tokens)
+            scannedStops.clear()
+            scannedStops.addAll(scan.stops)
+            importPhotoCount = 0
+            applyScan(scannedTokens.toList(), scannedStops.toSet())
             importLoading = false
         }
     }
@@ -1023,6 +1073,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         importMissed = emptyList()
         importTokenOf = emptyMap()
         importIgnored = 0
+        importNotice = null
+        importPhotoCount = 0
+        scannedTokens.clear()
+        scannedStops.clear()
         importError = message
     }
 
@@ -1031,11 +1085,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val missed = importMissed
         val tokenOf = importTokenOf
         val ignored = importIgnored
+        val photoCount = importPhotoCount
         importWords = emptyList()
         importMissed = emptyList()
         importTokenOf = emptyMap()
         importIgnored = 0
         importError = null
+        importNotice = null
+        importPhotoCount = 0
+        scannedTokens.clear()
+        scannedStops.clear()
         importLoading = false
         if (undoable && (words.isNotEmpty() || missed.isNotEmpty())) {
             offerUndo("清空了识别结果") {
@@ -1043,6 +1102,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 importMissed = missed
                 importTokenOf = tokenOf
                 importIgnored = ignored
+                importPhotoCount = photoCount
             }
         }
     }

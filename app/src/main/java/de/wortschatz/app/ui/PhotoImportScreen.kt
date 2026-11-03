@@ -74,12 +74,19 @@ fun PhotoImportScreen(vm: AppViewModel, onBack: () -> Unit, onLookup: (String) -
     val cameraLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.TakePicture()
     ) { ok ->
-        if (ok) pendingUri?.let { vm.recognizePhoto(it) }
+        if (ok) {
+            pendingUri?.let { uri ->
+                vm.recognizePhotos(listOf(uri), replace = vm.importPhotoCount == 0)
+            }
+        }
     }
+    // 相册支持一次多选；第一次选图时替换旧结果，之后再选则追加
     val galleryLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickVisualMedia()
-    ) { uri ->
-        if (uri != null) vm.recognizePhoto(uri)
+        ActivityResultContracts.PickMultipleVisualMedia()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            vm.recognizePhotos(uris, replace = vm.importPhotoCount == 0)
+        }
     }
 
     fun takePhoto() {
@@ -122,11 +129,21 @@ fun PhotoImportScreen(vm: AppViewModel, onBack: () -> Unit, onLookup: (String) -
 
             Column(modifier = Modifier.padding(horizontal = 20.dp)) {
                 Text(
-                    text = "拍教材或笔记上的单词表，自动识别并匹配本地词库；只会导入词库里已有的词。",
+                    text = "拍教材或笔记上的单词表，自动识别并匹配本地词库；" +
+                        "可以连拍多张、或从相册一次多选，结果会自动合并去重。",
                     fontSize = 12.5.sp,
                     lineHeight = 19.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (vm.importPhotoCount > 0) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "已识别 ${vm.importPhotoCount} 张图片 · " +
+                            "共 ${vm.importWords.size + vm.importMissed.size} 个候选词",
+                        fontSize = 11.5.sp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
@@ -153,6 +170,15 @@ fun PhotoImportScreen(vm: AppViewModel, onBack: () -> Unit, onLookup: (String) -
                     }
                 }
                 Spacer(Modifier.height(10.dp))
+            }
+
+            vm.importNotice?.let { notice ->
+                Text(
+                    text = notice,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.error
+                )
             }
 
             ImportResultPane(
