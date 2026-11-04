@@ -10,6 +10,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import de.wortschatz.app.data.Calendar0
 import de.wortschatz.app.data.OnlineDict
+import de.wortschatz.app.data.PhotoBitmap
 import de.wortschatz.app.data.PhotoOcr
 import de.wortschatz.app.data.PluralStyle
 import de.wortschatz.app.data.Progress
@@ -50,6 +51,29 @@ data class ReviewDay(
 ) {
     val count: Int get() = words.size
 }
+
+/**
+ * 照片上一个词的位置与匹配结果。
+ *
+ * [word] 为 null 表示识别到了、但词库没有收录——这种词块在界面上用另一种颜色，
+ * 要不要导入由用户决定（导入时需要补填释义）。
+ */
+data class ImportBlock(
+    val token: String,
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float,
+    val word: Word?
+)
+
+/** 一张已识别完成的导入图片：位图与它上面识别到的词块 */
+data class ImportPhoto(
+    val bitmap: android.graphics.Bitmap,
+    val width: Int,
+    val height: Int,
+    val blocks: List<ImportBlock>
+)
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -251,6 +275,48 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** 本次已成功识别的图片张数 */
     var importPhotoCount by mutableStateOf(0)
         private set
+
+    /**
+     * 已识别的图片及其词块。拍照导入的界面直接在位图上画词块，
+     * 所以位图与词块要一起存——只存 uri 的话，每次重组都得重新解码。
+     */
+    var importPhotos by mutableStateOf<List<ImportPhoto>>(emptyList())
+        private set
+
+    /** 选中的命中词条 id：选中的才会导入 */
+    var importPicked by mutableStateOf<Set<Long>>(emptySet())
+        private set
+
+    /** 选中的未收录词形（小写比较，避免大小写不同算两个） */
+    var importPickedTerms by mutableStateOf<Set<String>>(emptySet())
+        private set
+
+    /** 命中词条是否被选中 */
+    fun isImportPicked(wordId: Long): Boolean = wordId in importPicked
+
+    /** 未收录词形是否被选中 */
+    fun isImportTermPicked(term: String): Boolean = term.lowercase() in importPickedTerms
+
+    fun toggleImportWord(wordId: Long) {
+        importPicked = if (wordId in importPicked) importPicked - wordId else importPicked + wordId
+    }
+
+    fun toggleImportTerm(term: String) {
+        val key = term.lowercase()
+        importPickedTerms =
+            if (key in importPickedTerms) importPickedTerms - key else importPickedTerms + key
+    }
+
+    /** 一键全选 / 全不选（未收录词也算在内，选上再补释义即可） */
+    fun setAllImportsPicked(picked: Boolean) {
+        if (picked) {
+            importPicked = importWords.map { it.id }.toSet()
+            importPickedTerms = importMissed.map { it.lowercase() }.toSet()
+        } else {
+            importPicked = emptySet()
+            importPickedTerms = emptySet()
+        }
+    }
 
     /**
      * 累计的词元：多张图片会依次识别，结果按张数顺序合并去重，
@@ -1176,16 +1242,35 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 scannedTokens.clear()
                 scannedStops.clear()
                 importPhotoCount = 0
+                importPhotos = emptyList()
+                importPicked = emptySet()
+                importPickedTerms = emptySet()
             }
+            val fresh = mutableListOf<ImportPhoto>()
             var failed = 0
             uris.forEach { uri ->
                 runCatching {
-                    withContext(Dispatchers.IO) { PhotoOcr.recognize(getApplication(), uri) }
-                }.onSuccess { scan ->
+                    withContext(Dispatchers.IO) {
+                        val bitmap = PhotoBitmap.load(getApplication(), uri)
+                            ?: error("图片解码失败")
+                        bitmap to PhotoOcr.recognize(bitmap)
+                    }
+                }.onSuccess { (bitmap, scan) ->
                     importPhotoCount++
+                    fresh.add(
+                        ImportPhoto(
+                            bitmap = bitmap,
+                            width = bitmap.width,
+                            height = bitmap.height,
+                            blocks = scan.words.map {
+                                ImportBlock(it.token, it.left, it.top, it.right, it.bottom, null)
+                            }
+                        )
+                    )
                     scan.tokens.forEach { term -> if (term !in scannedTokens) scannedTokens.add(term) }
                     scannedStops.addAll(scan.stops)
                 }.onFailure {
+                    android.util.Log.e("Wortschatz", "图片识别失败: $uri", it)
                     failed++
                 }
             }
@@ -1196,7 +1281,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     else "没有识别到德语单词，换一张更清晰的图片试试"
                 )
             } else {
-                applyScan(scannedTokens.toList(), scannedStops.toSet())
+                // 一次匹配全量词元，再把结果贴回每个词块（同一词在多张图出现只查一次）
+                val pairs = withContext(Dispatchers.IO) { db.matchTokens(scannedTokens.toList()) }
+                val byToken = pairs.toMap()
+                importPhotos = importPhotos + fresh.map { photo ->
+                    photo.copy(
+                        blocks = photo.blocks.map { block ->
+                            block.copy(word = byToken[block.token])
+                        }
+                    )
+                }
+                applyMatched(scannedTokens.toList(), scannedStops.toSet(), pairs)
+                // 命中词默认全选；未收录默认不选——没有释义，导入了也背不了
+                importPicked = importPicked + importWords.map { it.id }
                 if (failed > 0) importNotice = "有 $failed 张图片未能识别，已跳过"
             }
             importLoading = false
@@ -1233,8 +1330,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * 早前不看词库一刀切，导致教材里的 unter / nur 这类词永远导不进来。
      */
     private suspend fun applyScan(tokens: List<String>, stops: Set<String>) {
-        // 逐个匹配：保持原文顺序，每个词元只对应一个词条
         val pairs = withContext(Dispatchers.IO) { db.matchTokens(tokens) }
+        applyMatched(tokens, stops, pairs)
+    }
+
+    /** 匹配结果 → 界面用的词条列表、未收录词形与虚词计数 */
+    private fun applyMatched(
+        tokens: List<String>,
+        stops: Set<String>,
+        pairs: List<Pair<String, Word>>
+    ) {
         val matched = pairs.map { it.second }.distinctBy { it.id }
         importWords = matched
         // 原文写法与词库词形不同时保留原文，供界面标注（Gemuese → das Gemüse）
@@ -1257,6 +1362,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         importIgnored = 0
         importNotice = null
         importPhotoCount = 0
+        importPhotos = emptyList()
+        importPicked = emptySet()
+        importPickedTerms = emptySet()
         scannedTokens.clear()
         scannedStops.clear()
         importError = message
@@ -1268,6 +1376,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val tokenOf = importTokenOf
         val ignored = importIgnored
         val photoCount = importPhotoCount
+        // 照片模式清空后无法恢复：位图不适合留在撤销快照里（一张就几 MB）
+        val hadPhotos = importPhotos.isNotEmpty()
         importWords = emptyList()
         importMissed = emptyList()
         importTokenOf = emptyMap()
@@ -1275,10 +1385,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         importError = null
         importNotice = null
         importPhotoCount = 0
+        importPhotos = emptyList()
+        importPicked = emptySet()
+        importPickedTerms = emptySet()
         scannedTokens.clear()
         scannedStops.clear()
         importLoading = false
-        if (undoable && (words.isNotEmpty() || missed.isNotEmpty())) {
+        if (undoable && !hadPhotos && (words.isNotEmpty() || missed.isNotEmpty())) {
             offerUndo("清空了识别结果") {
                 importWords = words
                 importMissed = missed
@@ -1296,9 +1409,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val tokenOf = importTokenOf
         importWords = importWords.filterNot { it.id == wordId }
         importTokenOf = importTokenOf - wordId
+        importPicked = importPicked - wordId
         offerUndo("删除了「${removed?.word ?: ""}」") {
             importWords = words
             importTokenOf = tokenOf
+            importPicked = importPicked + wordId
         }
     }
 

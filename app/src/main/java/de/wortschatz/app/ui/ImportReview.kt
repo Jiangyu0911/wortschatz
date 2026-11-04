@@ -325,16 +325,24 @@ fun ImportConfirmBar(
     checked: Set<Long>,
     defaultName: String,
     onDone: () -> Unit,
-    meanings: Map<String, String> = emptyMap()
+    meanings: Map<String, String> = emptyMap(),
+    /** 非空时只导入其中被选中的未收录词；null 表示未收录词只要有释义就导入 */
+    pickedTerms: Set<String>? = null
 ) {
     val context = LocalContext.current
     var showDialog by remember { mutableStateOf(false) }
     var bookName by rememberSaveable { mutableStateOf(defaultName) }
     // 用户补填了释义的词，会作为自定义词条一并入库
-    val extras = meanings.filterKeys { it in vm.importMissed }
+    val extras = meanings.filterKeys { term ->
+        term in vm.importMissed && (pickedTerms == null || term.lowercase() in pickedTerms)
+    }
         .filterValues { it.isNotBlank() }
         .map { (term, zh) -> term to zh }
     val total = checked.size + extras.size
+    // 选中了但还没填释义的未收录词：不填就不会入库，得在按钮上说清楚，别让人以为丢了
+    val pending = if (pickedTerms == null) 0 else vm.importMissed.count {
+        it.lowercase() in pickedTerms && meanings[it].isNullOrBlank()
+    }
 
     Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
         Button(
@@ -344,8 +352,11 @@ fun ImportConfirmBar(
             modifier = Modifier.fillMaxWidth().height(48.dp)
         ) {
             Text(
-                if (extras.isEmpty()) "导入 $total 个词到新单词书"
-                else "导入 $total 个词（含 ${extras.size} 个自填）",
+                text = when {
+                    pending > 0 -> "导入 $total 个词 · $pending 个待填释义"
+                    extras.isEmpty() -> "导入 $total 个词到新单词书"
+                    else -> "导入 $total 个词（含 ${extras.size} 个自填）"
+                },
                 fontSize = 14.5.sp
             )
         }
