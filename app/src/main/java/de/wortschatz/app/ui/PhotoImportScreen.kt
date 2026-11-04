@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -56,9 +55,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -356,8 +357,12 @@ fun PhotoImportScreen(vm: AppViewModel, onBack: () -> Unit, onLookup: (String) -
 /**
  * 一张照片与它上面的词块。
  *
- * 尺寸按宽度铺满、高度不超过 [MAX_PHOTO_HEIGHT]，再按同一比例换算词块坐标；
- * 图片用 FillBounds 而不是 Fit，保证「图上像素 → 屏幕 dp」是一个固定倍数。
+ * 照片尽量占满：左右只留 4dp，高度上限取屏幕的 92%（超过说明是长截图，按高度适配）。
+ * 图越大，原词在屏幕上的像素越多，词块就能贴着原文画而不用放大——
+ * 早先给词块设了「至少 19dp 高」的下限，结果块比原词还高，压到上下行。
+ *
+ * 图片用 FillBounds 而不是 Fit：让「图上像素 → 屏幕 dp」是一个固定倍数，
+ * 词块坐标乘同一个系数就能对准。
  */
 @Composable
 private fun PhotoCard(
@@ -366,15 +371,20 @@ private fun PhotoCard(
     onPickMissed: () -> Unit
 ) {
     val ratio = photo.width.toFloat() / photo.height.toFloat()
+    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .padding(horizontal = 4.dp, vertical = 6.dp)
     ) {
-        val maxH = 460.dp
+        val maxH = screenHeight * 0.92f
         val availW = maxWidth
-        val drawW = if (availW / ratio <= maxH) availW else maxH * ratio
-        val drawH = drawW / ratio
+        var drawW = availW
+        var drawH = drawW / ratio
+        if (drawH > maxH) {
+            drawH = maxH
+            drawW = maxH * ratio
+        }
         // 一个图片像素对应多少 dp
         val unit: Dp = drawW / photo.width
 
@@ -384,7 +394,7 @@ private fun PhotoCard(
                 .height(drawH)
                 .background(
                     MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                    RoundedCornerShape(12.dp)
+                    RoundedCornerShape(10.dp)
                 )
         ) {
             Image(
@@ -414,8 +424,12 @@ private fun PhotoCard(
 /**
  * 盖在一个词上的词块。
  *
- * 选中的块盖住原文并写出词库词形；没选中的块只留边框，露出原文——这样「不导入」
- * 不会让人以为这个词没被识别到。
+ * 选中时盖住原文并写出词库词形；没选中时只留一道细边框，露出原文——
+ * 这样「不导入」不会让人以为这个词没被识别到。
+ *
+ * 尺寸严格跟着 OCR 给的原词框走，不再设最小宽高：块比原词大就会压到相邻行，
+ * 看着像一片色块贴在书上。块变小后点击面积会不够，所以外面套一层透明的
+ * 点击层（上下左右各外扩 [TOUCH_PAD]），视觉不动、热区变大。
  */
 @Composable
 private fun WordBlock(
@@ -430,23 +444,25 @@ private fun WordBlock(
 
     val left = unit * block.left
     val top = unit * block.top
-    val minWidth = (unit * (block.right - block.left)).coerceAtLeast(24.dp)
-    val height = (unit * (block.bottom - block.top)).coerceAtLeast(19.dp)
+    val width = (unit * (block.right - block.left)).coerceAtLeast(6.dp)
+    val height = (unit * (block.bottom - block.top)).coerceAtLeast(7.dp)
 
     val accent = if (missed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
     val fill = if (picked) accent else Color.Transparent
-    val borderColor = if (picked) Color.Transparent else accent.copy(alpha = 0.55f)
+    val borderColor = if (picked) Color.Transparent else accent.copy(alpha = 0.5f)
     val label = word?.lemma ?: block.token
-    val fontSize = (height.value * 0.58f).coerceIn(6.5f, 11f).sp
+    // 字号同时受块高和块宽限制，让字一定落在块内：
+    // 德语字符平均宽度约为字号的 0.56 倍，据此反推块宽能容纳多大字号
+    val byHeight = height.value * 0.74f
+    val byWidth = width.value / (label.length.coerceAtLeast(1) * 0.56f)
+    val fontSize = minOf(byHeight, byWidth).coerceIn(5f, 11f).sp
+    val shape = RoundedCornerShape(3.dp)
 
     Box(
         modifier = Modifier
-            .offset(x = left, y = top)
-            .height(height)
-            .widthIn(min = minWidth)
+            .offset(x = left - TOUCH_PAD, y = top - TOUCH_PAD)
+            .size(width + TOUCH_PAD * 2, height + TOUCH_PAD * 2)
             .zIndex(if (picked) 1f else 0f)
-            .background(fill, RoundedCornerShape(4.dp))
-            .border(1.dp, borderColor, RoundedCornerShape(4.dp))
             .clickable {
                 if (word != null) {
                     vm.toggleImportWord(word.id)
@@ -454,24 +470,37 @@ private fun WordBlock(
                     vm.toggleImportTerm(block.token)
                     onPickMissed()
                 }
-            }
-            .padding(horizontal = 2.dp),
+            },
         contentAlignment = Alignment.Center
     ) {
-        if (picked) {
-            Text(
-                text = label,
-                fontSize = fontSize,
-                lineHeight = fontSize,
-                maxLines = 1,
-                softWrap = false,
-                fontFamily = FontFamily.Default,
-                fontWeight = FontWeight.Medium,
-                color = Color.White
-            )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(TOUCH_PAD)
+                .clip(shape)
+                .background(fill, shape)
+                .border(if (picked) 0.dp else 0.8.dp, borderColor, shape),
+            contentAlignment = Alignment.Center
+        ) {
+            if (picked) {
+                Text(
+                    text = label,
+                    fontSize = fontSize,
+                    lineHeight = fontSize,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Clip,
+                    fontFamily = FontFamily.Default,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.White
+                )
+            }
         }
     }
 }
+
+/** 词块点击热区的外扩量：视觉不跟着放大，只是更好点中 */
+private val TOUCH_PAD = 4.dp
 
 /**
  * 未收录词：默认收起，点开后可勾选并补填释义。
