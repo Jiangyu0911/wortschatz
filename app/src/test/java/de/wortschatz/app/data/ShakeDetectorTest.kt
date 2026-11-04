@@ -11,12 +11,13 @@ import kotlin.math.sin
  * 摇一摇判定逻辑的回归测试。
  *
  * 阈值这类参数没法靠界面截图验证，用合成加速度序列把几种常见情形固定下来：
- * 静止、走路、磕碰都不能触发；真实甩动必须触发；冷却期内不能连触发。
+ * 静止、走路、手腕抖动、磕碰、单向甩动都不能触发；真实往复摇动必须触发；
+ * 冷却期内不能连触发。
  */
 class ShakeDetectorTest {
 
     /**
-     * 以 50Hz（SENSOR_DELAY_GAME 的 20ms）采样，喂一段正弦振动，
+     * 以 50Hz（SENSOR_DELAY_GAME 的 20ms）采样，喂一段正弦往复振动，
      * 返回这段时间里触发的次数。
      */
     private fun feed(
@@ -38,6 +39,15 @@ class ShakeDetectorTest {
         return triggers
     }
 
+    /** 喂一段给定的加速度序列（50Hz），返回触发次数 */
+    private fun feedSequence(detector: ShakeDetector, values: List<Float>, startMs: Long = 0L): Int {
+        var triggers = 0
+        values.forEachIndexed { i, v ->
+            if (detector.onSample(0f, v, 0f, startMs + i * 20L)) triggers++
+        }
+        return triggers
+    }
+
     @Test
     fun `静止放着不会触发`() {
         val detector = ShakeDetector()
@@ -55,48 +65,65 @@ class ShakeDetectorTest {
     }
 
     @Test
+    fun `手腕抖动不会触发`() {
+        val detector = ShakeDetector()
+        // 4Hz、幅度 8 m/s²：握着手机打字、上下楼时手的抖动量级
+        assertEquals(0, feed(detector, amplitude = 8f, frequencyHz = 4f, durationMs = 2000))
+    }
+
+    @Test
     fun `放到桌上磕一下不会触发`() {
         val detector = ShakeDetector()
-        // 静置若干帧后一次冲击，再回到静止：只有起手和收手两帧超阈值，凑不够 4 帧
-        var t = 0L
-        repeat(10) {
-            detector.onSample(0f, GRAVITY, 0f, t)
-            t += 20
-        }
-        detector.onSample(0f, 30f, 0f, t)
-        t += 20
-        detector.onSample(0f, GRAVITY, 0f, t)
-
-        assertEquals(0, detector.triggerCount)
+        // 静置若干帧后一次冲击，再回到静止
+        val values = List(10) { GRAVITY } + listOf(GRAVITY + 20f, GRAVITY + 30f) + List(10) { GRAVITY }
+        assertEquals(0, feedSequence(detector, values))
     }
 
     @Test
-    fun `刻意甩动会触发`() {
+    fun `单向甩一下不会触发`() {
+        val detector = ShakeDetector()
+        // 从口袋掏出手机、或单手把手机往前一送：加速到位后停住，没有往复
+        val values = List(5) { GRAVITY } +
+            List(6) { GRAVITY + 18f } +
+            listOf(GRAVITY + 18f, GRAVITY + 9f, GRAVITY) +
+            List(10) { GRAVITY }
+        assertEquals(0, feedSequence(detector, values))
+    }
+
+    @Test
+    fun `刻意往复摇动会触发`() {
         val detector = ShakeDetector()
         // 约 4Hz、幅度 25 m/s²：明显甩一下手机的量级
-        assertTrue(feed(detector, amplitude = 25f, frequencyHz = 4f, durationMs = 600) >= 1)
+        assertTrue(feed(detector, amplitude = 25f, frequencyHz = 4f, durationMs = 800) >= 1)
     }
 
     @Test
-    fun `慢一些的摇动也能触发`() {
+    fun `中等力度的摇动也会触发`() {
         val detector = ShakeDetector()
-        // 3Hz、幅度 16 m/s²：不算用力但确实在摇
-        assertTrue(feed(detector, amplitude = 16f, frequencyHz = 3f, durationMs = 800) >= 1)
+        // 3Hz、幅度 20 m/s²：不算用力，但确实是来回摇
+        assertTrue(feed(detector, amplitude = 20f, frequencyHz = 3f, durationMs = 1000) >= 1)
+    }
+
+    @Test
+    fun `很轻的晃动不触发`() {
+        val detector = ShakeDetector()
+        // 3Hz、幅度 12 m/s²：只是随手晃一下
+        assertEquals(0, feed(detector, amplitude = 12f, frequencyHz = 3f, durationMs = 1000))
     }
 
     @Test
     fun `冷却时间内不会连续触发`() {
         val detector = ShakeDetector()
-        feed(detector, amplitude = 25f, frequencyHz = 4f, durationMs = 400, startMs = 0)
+        feed(detector, amplitude = 25f, frequencyHz = 4f, durationMs = 500, startMs = 0)
         val first = detector.triggerCount
         assertTrue(first >= 1)
 
-        // 紧接着再甩：仍在冷却期（1500ms）内，不应再触发
-        feed(detector, amplitude = 25f, frequencyHz = 4f, durationMs = 400, startMs = 500)
+        // 紧接着再摇：仍在冷却期（2000ms）内，不应再触发
+        feed(detector, amplitude = 25f, frequencyHz = 4f, durationMs = 500, startMs = 700)
         assertEquals(first, detector.triggerCount)
 
-        // 冷却过去之后再甩，应该能触发
-        feed(detector, amplitude = 25f, frequencyHz = 4f, durationMs = 400, startMs = 3000)
+        // 冷却过去之后再摇，应该能触发
+        feed(detector, amplitude = 25f, frequencyHz = 4f, durationMs = 600, startMs = 3500)
         assertTrue(detector.triggerCount > first)
     }
 

@@ -33,7 +33,7 @@ import de.wortschatz.app.AppViewModel
 import de.wortschatz.app.data.ShakeDetector
 
 /** 两次触发的最小间隔，避免一次甩动连弹两次弹窗 */
-private const val SHAKE_COOLDOWN_MS = 1500L
+private const val SHAKE_COOLDOWN_MS = ShakeDetector.COOLDOWN_MS
 
 /**
  * 摇一摇撤销。
