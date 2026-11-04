@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.CameraAlt
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.LocalFireDepartment
 import androidx.compose.material.icons.rounded.MenuBook
@@ -43,6 +44,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import de.wortschatz.app.AppViewModel
+import de.wortschatz.app.ReviewDay
 import de.wortschatz.app.data.StudyStats
 import de.wortschatz.app.ui.theme.ExtraColors
 import java.util.Calendar
@@ -54,6 +57,7 @@ fun HomeScreen(
     totalWords: Int,
     activeLevels: Set<String>,
     dailyTarget: Int,
+    reviewPlan: List<ReviewDay>,
     onStartReview: () -> Unit,
     onStartNew: () -> Unit,
     onOpenCalendar: () -> Unit,
@@ -62,6 +66,7 @@ fun HomeScreen(
     onOpenTextImport: () -> Unit,
     onOpenBooks: () -> Unit,
     onOpenRecords: () -> Unit,
+    onOpenReviewPlan: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -77,6 +82,13 @@ fun HomeScreen(
                 dailyTarget = dailyTarget,
                 onStartReview = onStartReview,
                 onStartNew = onStartNew,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            )
+        }
+        item {
+            ReviewPlanCard(
+                plan = reviewPlan,
+                onClick = onOpenReviewPlan,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             )
         }
@@ -318,6 +330,93 @@ private fun TodayCard(
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * 复习安排概览：今天 / 明天 / 后天各有多少词到期，点进去看完整计划。
+ *
+ * 首页只放三个数字，因为用户在这里要判断的是「今天还欠多少」，
+ * 具体是哪几个词留到详情页看。
+ */
+@Composable
+private fun ReviewPlanCard(
+    plan: List<ReviewDay>,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val byDay = plan.associateBy { it.daysFromToday }
+    val total = plan.sumOf { it.count }
+    val slots = listOf(0 to "今天", 1 to "明天", 2 to "后天")
+
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        onClick = onClick
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "复习安排",
+                    fontFamily = FontFamily.Default,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = "查看全部",
+                    fontSize = 11.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Icon(
+                    Icons.Rounded.ChevronRight,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                slots.forEach { (index, label) ->
+                    val count = byDay[index]?.count ?: 0
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = count.toString(),
+                            fontFamily = FontFamily.Default,
+                            fontSize = 21.sp,
+                            fontWeight = FontWeight.Bold,
+                            // 今天有量就点亮：这是唯一「现在必须做」的数字
+                            color = if (index == 0 && count > 0) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = label,
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                // 前三天都没量时（间隔 4 天起最常见），直接告诉用户下次是哪天，
+                // 否则三个 0 会看成「没有复习任务」
+                text = when {
+                    total == 0 -> "还没有到期的词，学过的词会按遗忘曲线排进来"
+                    (byDay[0]?.count ?: 0) > 0 -> "未来 ${AppViewModel.REVIEW_PLAN_DAYS} 天共 $total 个词待复习"
+                    else -> {
+                        val next = plan.first()
+                        "下次复习：${next.title} ${next.dateText} · ${next.count} 个" +
+                            "（未来 ${AppViewModel.REVIEW_PLAN_DAYS} 天共 $total 个）"
+                    }
+                },
+                fontSize = 11.5.sp,
+                color = MaterialTheme.colorScheme.outline
+            )
         }
     }
 }

@@ -1,5 +1,10 @@
 package de.wortschatz.app.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,6 +42,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRequester
@@ -53,6 +61,7 @@ import de.wortschatz.app.AppViewModel
 import de.wortschatz.app.data.SpellTest
 import de.wortschatz.app.data.Word
 import de.wortschatz.app.ui.theme.ExtraColors
+import kotlinx.coroutines.delay
 
 /**
  * 一轮学完后的拼写自测：看中文写德语。
@@ -60,58 +69,98 @@ import de.wortschatz.app.ui.theme.ExtraColors
  */
 @Composable
 fun SpellTestScreen(vm: AppViewModel, onExit: () -> Unit) {
+    // 判定结果以悬浮卡片呈现：不参与布局，题目与输入框不会因为多出一条横幅而上下跳
+    var feedbackVisible by remember { mutableStateOf(false) }
+    val currentWord = vm.spellWord
+    val finished = vm.spellFinished || currentWord == null
+
+    LaunchedEffect(vm.spellChecked, currentWord?.id, vm.spellLastCorrect) {
+        if (!vm.spellChecked || finished) {
+            feedbackVisible = false
+            return@LaunchedEffect
+        }
+        feedbackVisible = true
+        // 答对也要留出看复数的眼力时间；答错更久，因为要记住正确答案
+        delay(if (vm.spellLastCorrect) 2200L else 4500L)
+        feedbackVisible = false
+    }
+
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
                 .navigationBarsPadding()
                 .imePadding()
         ) {
-            // ---- 顶部进度
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onExit) {
-                    Icon(
-                        Icons.Rounded.Close,
-                        contentDescription = "退出拼写测试",
-                        modifier = Modifier.size(21.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+            Column(modifier = Modifier.fillMaxSize()) {
+                // ---- 顶部进度
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onExit) {
+                        Icon(
+                            Icons.Rounded.Close,
+                            contentDescription = "退出拼写测试",
+                            modifier = Modifier.size(21.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    LinearProgressIndicator(
+                        progress = {
+                            if (vm.spellTotal == 0) 0f
+                            else vm.spellPassed.toFloat() / vm.spellTotal
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(6.dp)
+                            .clip(CircleShape),
+                        color = ExtraColors.levelA2,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        text = "${vm.spellPassed}/${vm.spellTotal}",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
+
+                if (finished) {
+                    SpellResult(vm = vm, onExit = onExit, modifier = Modifier.weight(1f))
+                } else {
+                    SpellQuestion(
+                        vm = vm,
+                        word = currentWord!!,
+                        modifier = Modifier.weight(1f)
                     )
                 }
-                LinearProgressIndicator(
-                    progress = {
-                        if (vm.spellTotal == 0) 0f
-                        else vm.spellPassed.toFloat() / vm.spellTotal
-                    },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(6.dp)
-                        .clip(CircleShape),
-                    color = ExtraColors.levelA2,
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant
-                )
-                Spacer(Modifier.width(12.dp))
-                Text(
-                    text = "${vm.spellPassed}/${vm.spellTotal}",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.width(8.dp))
             }
 
-            if (vm.spellFinished || vm.spellWord == null) {
-                SpellResult(vm = vm, onExit = onExit, modifier = Modifier.weight(1f))
-            } else {
-                SpellQuestion(
-                    vm = vm,
-                    word = vm.spellWord!!,
-                    modifier = Modifier.weight(1f)
-                )
+            // 悬浮反馈：贴在顶部进度条下方，飘在题目之上；键盘弹起时这里也不会被挡住
+            AnimatedVisibility(
+                visible = feedbackVisible && !finished && currentWord != null,
+                enter = fadeIn() + slideInVertically { -it / 2 },
+                exit = fadeOut() + slideOutVertically { -it / 2 },
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(horizontal = 20.dp)
+                    // 让过顶部进度条（约 52dp）与「跳过 / 检查」操作条（约 44dp）再留点缝，
+                    // 否则浮卡会压住「检查 / 继续测试」按钮
+                    .padding(top = 108.dp)
+            ) {
+                currentWord?.let { word ->
+                    SpellFeedback(
+                        word = word,
+                        correct = vm.spellLastCorrect,
+                        pluralNote = word.pluralNote(vm.pluralStyle),
+                        onSpeak = { vm.speakWord(word) }
+                    )
+                }
             }
         }
     }
@@ -136,10 +185,6 @@ private fun SpellQuestion(vm: AppViewModel, word: Word, modifier: Modifier = Mod
     }
 
     val scrollState = rememberScrollState()
-    // 反馈显示在顶部：判定后把视图拉回顶部，保证一眼能看到对错
-    LaunchedEffect(vm.spellChecked) {
-        if (vm.spellChecked) runCatching { scrollState.animateScrollTo(0) }
-    }
 
     Column(
         modifier = modifier
@@ -184,17 +229,6 @@ private fun SpellQuestion(vm: AppViewModel, word: Word, modifier: Modifier = Mod
                 onClick = {
                     if (vm.spellChecked) vm.nextSpelling() else vm.checkSpelling()
                 }
-            )
-        }
-
-        // 判定结果放在顶部：键盘弹起时下方区域会被挡住，只有这里一定可见
-        if (vm.spellChecked) {
-            Spacer(Modifier.height(8.dp))
-            SpellFeedback(
-                word = word,
-                correct = vm.spellLastCorrect,
-                pluralNote = word.pluralNote(vm.pluralStyle),
-                onSpeak = { vm.speakWord(word) }
             )
         }
 
@@ -296,8 +330,10 @@ private fun SpellQuestion(vm: AppViewModel, word: Word, modifier: Modifier = Mod
 }
 
 /**
- * 顶部反馈横幅：正确显示「拼写正确」，错误直接给正确答案，并可朗读。
- * 放在页面上方而不是输入框下方——键盘弹起后下方会被遮挡。
+ * 悬浮的对错提示：正确显示「拼写正确」，错误直接给正确答案，并可朗读。
+ *
+ * 以浮层形式盖在题目上方，不占布局：判定前后页面结构完全不变，输入框与按钮不会位移，
+ * 也就不会出现「键盘弹起 + 多出一条横幅把按钮挤走」的老问题。
  */
 @Composable
 private fun SpellFeedback(
@@ -308,9 +344,12 @@ private fun SpellFeedback(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(14.dp),
+        // 浮层必须不透明：半透明会让背后的题目文字透出来，看着像渲染错位
         color = if (correct) ExtraColors.successContainer
-        else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f)
+        else MaterialTheme.colorScheme.errorContainer,
+        // 投影是「浮起来」的关键：没有它和普通卡片没区别
+        shadowElevation = 10.dp
     ) {
         Row(
             modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),

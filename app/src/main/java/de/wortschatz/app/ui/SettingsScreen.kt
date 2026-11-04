@@ -741,7 +741,7 @@ fun SettingsScreen(
                     Spacer(Modifier.width(8.dp))
                     Column {
                         Text(
-                            text = "德语单词 Wortschatz 1.33",
+                            text = "德语单词 Wortschatz 1.34",
                             fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurface
                         )

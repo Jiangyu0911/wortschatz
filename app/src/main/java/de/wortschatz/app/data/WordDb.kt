@@ -552,6 +552,28 @@ class WordDb private constructor(context: Context) :
             .use { c -> buildList { while (c.moveToNext()) add(readWordWithProgress(c)) } }
     }
 
+    /**
+     * 某个时刻之前到期的全部词（含已逾期未复习的）。
+     *
+     * 与 [dueWords] 的区别：不分页、不限数量，供「复习安排」按天分组展示用。
+     * 上限由调用方通过 until 控制，避免把几年的复习计划一次性读出来。
+     */
+    fun dueWordsUntil(
+        until: Long,
+        levels: Set<String>,
+        bookId: String? = null
+    ): List<WordWithProgress> {
+        val filter = bookFilter(bookId) ?: levelClause(levels, "w.")
+        val sql = """
+            SELECT ${prefix("w.")}, ${prefixProgress()}
+            FROM words w JOIN progress p ON p.word_id = w.id
+            WHERE p.state > 0 AND p.mastered = 0 AND p.due < ? $filter
+            ORDER BY p.due ASC
+        """.trimIndent()
+        return readableDatabase.rawQuery(sql, arrayOf(until.toString()))
+            .use { c -> buildList { while (c.moveToNext()) add(readWordWithProgress(c)) } }
+    }
+
     /** 未学过的新词，按等级由低到高取；bookId 非空时只取该书内的词 */
     fun newWords(
         levels: Set<String>,

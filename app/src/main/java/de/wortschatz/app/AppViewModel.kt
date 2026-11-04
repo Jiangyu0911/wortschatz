@@ -31,6 +31,25 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
+
+/**
+ * 复习安排里的一天。
+ *
+ * [daysFromToday] 为 0 表示「今天」——已逾期但没复习的词也归在这一档，
+ * 因为它们此刻就是要复习的。
+ */
+data class ReviewDay(
+    val daysFromToday: Int,
+    val title: String,
+    val dateText: String,
+    val words: List<WordWithProgress>
+) {
+    val count: Int get() = words.size
+}
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -368,6 +387,71 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             loadCheckins()
             loadRecords()
             loadBookWords()
+            loadReviewPlan()
+        }
+    }
+
+    // ---------------------------------------------------------------- 复习安排
+
+    /**
+     * 未来 [REVIEW_PLAN_DAYS] 天里每天要复习的词。
+     *
+     * 只包含真有词的日期：没有安排的那天不占位，列表读起来更短；
+     * 首页概览按 [ReviewDay.daysFromToday] 取值，缺的那天自然显示 0。
+     */
+    var reviewPlan by mutableStateOf<List<ReviewDay>>(emptyList())
+        private set
+    private var reviewPlanLoading by mutableStateOf(false)
+
+    fun loadReviewPlan(days: Int = REVIEW_PLAN_DAYS) {
+        if (reviewPlanLoading) return
+        reviewPlanLoading = true
+        viewModelScope.launch {
+            reviewPlan = withContext(Dispatchers.IO) { buildReviewPlan(days) }
+            reviewPlanLoading = false
+        }
+    }
+
+    private fun buildReviewPlan(days: Int): List<ReviewDay> {
+        val todayStart = Calendar0.today()
+        val startMs = todayStart.timeInMillis
+        // 时区没有夏令时跳变，按 24 小时切天足够；真要跨时区再改成 Calendar 逐日推算
+        val dayMs = 24L * 60 * 60 * 1000
+        val items = db.dueWordsUntil(startMs + days * dayMs, levels, currentBookId)
+
+        val buckets = mutableMapOf<Int, MutableList<WordWithProgress>>()
+        for (item in items) {
+            val offset = ((item.progress.due - startMs) / dayMs).toInt()
+            // 逾期（due 早于今天零点）归到「今天」这一档
+            val index = offset.coerceIn(0, days - 1)
+            buckets.getOrPut(index) { mutableListOf() }.add(item)
+        }
+
+        val dateFormat = SimpleDateFormat("M月d日", Locale.CHINA)
+        return (0 until days).mapNotNull { index ->
+            val words = buckets[index] ?: return@mapNotNull null
+            val date = (todayStart.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, index) }
+            ReviewDay(
+                daysFromToday = index,
+                title = dayTitle(index, date),
+                dateText = dateFormat.format(Date(date.timeInMillis)),
+                words = words
+            )
+        }
+    }
+
+    private fun dayTitle(index: Int, date: Calendar): String = when (index) {
+        0 -> "今天"
+        1 -> "明天"
+        2 -> "后天"
+        else -> when (date.get(Calendar.DAY_OF_WEEK)) {
+            Calendar.SUNDAY -> "周日"
+            Calendar.MONDAY -> "周一"
+            Calendar.TUESDAY -> "周二"
+            Calendar.WEDNESDAY -> "周三"
+            Calendar.THURSDAY -> "周四"
+            Calendar.FRIDAY -> "周五"
+            else -> "周六"
         }
     }
 
@@ -1333,6 +1417,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
         /** 撤销过程中产生的反向登记要丢弃的时间窗口 */
         private const val UNDO_SUPPRESS_MS = 800L
+
+        /** 复习安排看未来几天 */
+        const val REVIEW_PLAN_DAYS = 7
 
         private const val PREFS_NAME = "wortschatz_prefs"
         private const val KEY_LEVELS = "levels"

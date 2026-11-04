@@ -90,6 +90,12 @@ private fun MainScaffold(vm: AppViewModel) {
     var showBook by remember { mutableStateOf(false) }
     var showPhotoImport by remember { mutableStateOf(false) }
     var showTextImport by remember { mutableStateOf(false) }
+    var showReviewPlan by remember { mutableStateOf(false) }
+
+    if (showReviewPlan) {
+        ReviewPlanScreen(vm = vm, onBack = { showReviewPlan = false })
+        return
+    }
 
     if (showTextImport) {
         TextImportScreen(
@@ -195,6 +201,7 @@ private fun MainScaffold(vm: AppViewModel) {
                         totalWords = vm.totalWords,
                         activeLevels = vm.levels,
                         dailyTarget = vm.sessionSize,
+                        reviewPlan = vm.reviewPlan,
                         onStartReview = {
                             vm.startSession(AppViewModel.SessionMode.REVIEW)
                             showStudy = true
@@ -208,7 +215,8 @@ private fun MainScaffold(vm: AppViewModel) {
                         onOpenPhotoImport = { showPhotoImport = true },
                         onOpenTextImport = { showTextImport = true },
                         onOpenBooks = { tab = 3 },
-                        onOpenRecords = { showRecords = true }
+                        onOpenRecords = { showRecords = true },
+                        onOpenReviewPlan = { showReviewPlan = true }
                     )
 
                     1 -> SearchScreen(vm = vm)
