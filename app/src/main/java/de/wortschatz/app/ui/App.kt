@@ -71,17 +71,13 @@ private data class TabItem(
 
 @Composable
 fun WortschatzApp(vm: AppViewModel) {
-    Box(modifier = Modifier.fillMaxSize()) {
-        // 加载结束时不直接「啪」地切走，与主界面做一次淡入淡出
-        Crossfade(
-            targetState = vm.initializing,
-            animationSpec = tween(durationMillis = 380, easing = FastOutSlowInEasing),
-            label = "splash"
-        ) { loading ->
-            if (loading) Splash() else MainScaffold(vm)
-        }
-        // 摇一摇撤销：弹窗是独立 Window，放在最外层才能覆盖学习页、拼写页等全屏页面
-        ShakeUndoHost(vm)
+    // 加载结束时不直接「啪」地切走，与主界面做一次淡入淡出
+    Crossfade(
+        targetState = vm.initializing,
+        animationSpec = tween(durationMillis = 380, easing = FastOutSlowInEasing),
+        label = "splash"
+    ) { loading ->
+        if (loading) Splash() else MainScaffold(vm)
     }
 }
 

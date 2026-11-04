@@ -76,10 +76,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val pluralStyle: PluralStyle
         get() = if (pluralSuffixOnly) PluralStyle.SUFFIX else PluralStyle.FULL
 
-    /** 摇一摇撤销：默认开启。关掉后没有任何撤销入口（原来那条提示条已移除） */
-    var shakeUndoEnabled by mutableStateOf(prefs.getBoolean(KEY_SHAKE_UNDO, true))
-        private set
-
     // ---- 查词
     var query by mutableStateOf("")
         private set
@@ -144,16 +140,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private var undoExpireJob: Job? = null
 
     /**
+     * 撤销动作自身会触发反向操作（例如撤销「收藏」就是取消收藏），而那一步又会登记
+     * 一条新的撤销——卡片上就会立刻出现「已加入生词本」，看着像没撤成功。这里给一个
+     * 抑制窗口：撤销过程中产生的登记一律丢弃，撤销完卡片回到「暂无可撤销的操作」。
+     */
+    private var undoSuppressUntil = 0L
+
+    /**
      * 登记一步可撤销操作。
      *
      * 只保留最近一步：连续操作时，旧的那步自然失效——这符合「撤销上一步」的直觉，
      * 也避免维护一整个历史栈带来的状态不一致。
      *
-     * 撤销改成「摇一摇」后界面上不再有提示条，所以给一个有效期：
-     * 过期即失效，避免几分钟后摇一下手机把早已翻篇的操作回退掉
-     * （此时快照里的队列状态早已不是当前状态）。
+     * 撤销入口在设置页（手动点按钮），用户要走几步才能点到，所以有效期给得宽（10 分钟）；
+     * 但不能无限：过期后快照里的学习队列早已和当前状态对不上，回退过去会错乱。
      */
     private fun offerUndo(label: String, restore: () -> Unit) {
+        if (System.currentTimeMillis() < undoSuppressUntil) return
         undoRestore = restore
         undoLabel = label
         undoExpireJob?.cancel()
@@ -170,6 +173,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         undoLabel = null
         undoExpireJob?.cancel()
         undoExpireJob = null
+        // 覆盖同步与异步两种回退路径：收藏的恢复是协程里做的，只靠标志位盖不住
+        undoSuppressUntil = System.currentTimeMillis() + UNDO_SUPPRESS_MS
         restore?.invoke()
     }
 
@@ -517,6 +522,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             if (items.isEmpty()) return@launch
             queue.clear()
             queue.addAll(items)
+            // 新一轮已经重排，上一轮留下的快照对不上当前队列，撤销一并作废
+            clearUndo()
             streakMap.clear()
             sessionStats.clear()
             currentStreak = 0
@@ -1008,18 +1015,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putBoolean(KEY_PLURAL_SUFFIX, v).apply()
     }
 
-    fun updateShakeUndo(v: Boolean) {
-        shakeUndoEnabled = v
-        prefs.edit().putBoolean(KEY_SHAKE_UNDO, v).apply()
-    }
-
-    /** 「摇一摇可以撤销」的提示只弹一次，别每次操作都提醒 */
-    fun shakeHintShown(): Boolean = prefs.getBoolean(KEY_SHAKE_HINT, false)
-
-    fun markShakeHintShown() {
-        prefs.edit().putBoolean(KEY_SHAKE_HINT, true).apply()
-    }
-
     fun updateAutoSpeak(v: Boolean) {
         autoSpeak = v
         prefs.edit().putBoolean(KEY_AUTO_SPEAK, v).apply()
@@ -1328,12 +1323,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         const val PASS_STREAK = 3
 
         /**
-         * 撤销的有效期。
+         * 撤销的有效期（10 分钟）。
          *
-         * 界面上不再显示撤销条，用户没有「还剩几秒」的视觉提示，
-         * 这里取一个足够宽裕的值：来得及反应过来摇一摇，又不会久到快照过期。
+         * 入口在设置页，用户要退出学习、切到设置、滚动找到卡片才点得到，
+         * 所以不能像提示条那样只给十几秒；但也不能永久——快照里的学习队列
+         * 时间一长就和当前状态对不上了。
          */
-        const val UNDO_TTL_MS = 45_000L
+        const val UNDO_TTL_MS = 10 * 60 * 1000L
+
+        /** 撤销过程中产生的反向登记要丢弃的时间窗口 */
+        private const val UNDO_SUPPRESS_MS = 800L
 
         private const val PREFS_NAME = "wortschatz_prefs"
         private const val KEY_LEVELS = "levels"
@@ -1343,8 +1342,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         private const val KEY_THEME = "theme_mode"
         private const val KEY_SPELL_TEST = "spell_test"
         private const val KEY_PLURAL_SUFFIX = "plural_suffix_only"
-        private const val KEY_SHAKE_UNDO = "shake_undo"
-        private const val KEY_SHAKE_HINT = "shake_undo_hint"
         private const val KEY_BOOKS = "custom_books"
         private const val KEY_SEARCH_HISTORY = "search_history"
         private const val HISTORY_SEP = "\u001F"

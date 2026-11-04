@@ -23,8 +23,8 @@ android {
         applicationId = "de.wortschatz.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 33
-        versionName = "1.32"
+        versionCode = 34
+        versionName = "1.33"
 
         // 只保留实际会用到的 ABI：真机为 arm64/armeabi，x86_64 供模拟器测试；
         // OCR 原生库每个 ABI 约 10MB，去掉 x86 可省下这份体积
@@ -93,7 +93,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-    testImplementation("junit:junit:4.13.2")
     // 系统级启动画面：让冷启动立刻显示品牌标识，而不是先白屏
     implementation("androidx.core:core-splashscreen:1.0.1")
     // 拍照/相册导入：内置拉丁字母 OCR 模型，随 APK 分发，不依赖 Google Play 服务

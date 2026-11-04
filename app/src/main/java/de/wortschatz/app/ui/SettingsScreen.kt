@@ -28,6 +28,7 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.ListAlt
 import androidx.compose.material.icons.rounded.RecordVoiceOver
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -117,6 +118,48 @@ fun SettingsScreen(
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onBackground
                 )
+            }
+        }
+
+        // ---------------- 撤销
+        // 没有自动入口：误触的代价比多走两步高，所以放在设置页最上面，需要时来点
+        item {
+            val undoLabel = vm.undoLabel
+            SettingCard(title = "撤销") {
+                Text(
+                    text = undoLabel ?: "暂无可撤销的操作",
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = if (undoLabel == null) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text = if (undoLabel == null)
+                        "评价卡片、收藏词条、提交拼写或删除导入词之后，可以回到这里退一步"
+                    else
+                        "回退这一步，恢复到操作之前的状态" +
+                            "（${AppViewModel.UNDO_TTL_MS / 60_000} 分钟内有效）",
+                    fontSize = 11.5.sp,
+                    lineHeight = 17.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(12.dp))
+                FilledTonalButton(
+                    onClick = {
+                        val label = vm.undoLabel ?: return@FilledTonalButton
+                        vm.undo()
+                        Toast.makeText(context, "已撤销：$label", Toast.LENGTH_SHORT).show()
+                    },
+                    enabled = undoLabel != null,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "撤销这一步",
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
         }
 
@@ -351,37 +394,6 @@ fun SettingsScreen(
                     Switch(
                         checked = vm.spellTestEnabled,
                         onCheckedChange = { vm.updateSpellTest(it) },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                            checkedTrackColor = MaterialTheme.colorScheme.primary
-                        )
-                    )
-                }
-            }
-        }
-
-        // ---------------- 撤销
-        item {
-            SettingCard(title = "撤销") {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "摇一摇手机撤销",
-                            fontSize = 13.5.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            text = "摇一下手机弹出确认框，确认后回退刚才那一步" +
-                                "（${AppViewModel.UNDO_TTL_MS / 1000} 秒内有效）",
-                            fontSize = 11.5.sp,
-                            lineHeight = 17.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = vm.shakeUndoEnabled,
-                        onCheckedChange = { vm.updateShakeUndo(it) },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
                             checkedTrackColor = MaterialTheme.colorScheme.primary
@@ -729,7 +741,7 @@ fun SettingsScreen(
                     Spacer(Modifier.width(8.dp))
                     Column {
                         Text(
-                            text = "德语单词 Wortschatz 1.32",
+                            text = "德语单词 Wortschatz 1.33",
                             fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurface
                         )
