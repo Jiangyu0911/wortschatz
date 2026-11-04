@@ -1,5 +1,6 @@
 package de.wortschatz.app.ui
 
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 
 import androidx.compose.foundation.layout.Arrangement
@@ -41,6 +42,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -63,6 +65,13 @@ fun BookDetailScreen(vm: AppViewModel, onBack: () -> Unit) {
     val book = vm.currentBook
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<Word>>(emptyList()) }
+    val context = LocalContext.current
+
+    // 移出后行会立刻消失，但撤销入口藏在设置页，提一句免得以为删错了没法回头
+    val onRemoveWord: (Word) -> Unit = { word ->
+        vm.removeFromBook(word)
+        Toast.makeText(context, "已移出，可在「设置」中撤销", Toast.LENGTH_SHORT).show()
+    }
 
     LaunchedEffect(Unit) { vm.loadBookWords() }
 
@@ -125,7 +134,7 @@ fun BookDetailScreen(vm: AppViewModel, onBack: () -> Unit) {
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 placeholder = {
                     Text(
-                        text = "搜索单词并加入本书",
+                        text = "搜索：书里已有的词可移出，其他词可加入",
                         fontSize = 14.5.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -163,17 +172,33 @@ fun BookDetailScreen(vm: AppViewModel, onBack: () -> Unit) {
             )
 
             val showResults = query.isNotBlank()
-            val list = if (showResults) results else vm.bookWords
+            // 搜索时同时给出两份结果：书里命中的（可移出）与书外可加入的。
+            // 书里的词不能只靠全库搜索结果——全库查询有条数上限，词表大时会被挤掉
+            val inBookHits = if (showResults) vm.searchInCurrentBook(query) else emptyList()
+            val others = if (showResults) {
+                results.filterNot { w -> inBookHits.any { it.id == w.id } }
+            } else {
+                emptyList()
+            }
+            val matches = inBookHits.size + others.size
+            val isEmpty = if (showResults) matches == 0 else vm.bookWords.isEmpty()
 
-            Text(
-                text = if (showResults) "搜索结果，点 + 加入本书"
-                else "书里的词，点右侧 ✕ 移出",
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
-                fontSize = 11.5.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            // 空状态由列表区居中提示，这里再写一句「没有匹配的词」就重复了
+            if (!isEmpty) {
+                Text(
+                    text = when {
+                        !showResults -> "书里的词，点右侧 ✕ 移出"
+                        others.isEmpty() -> "书里 ${inBookHits.size} 个匹配"
+                        inBookHits.isEmpty() -> "全库 ${others.size} 个可加入"
+                        else -> "书里 ${inBookHits.size} 个（点 ✕ 移出）· 全库另 ${others.size} 个可加入"
+                    },
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
+                    fontSize = 11.5.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
-            if (list.isEmpty()) {
+            if (isEmpty) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
@@ -190,18 +215,43 @@ fun BookDetailScreen(vm: AppViewModel, onBack: () -> Unit) {
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(list, key = { it.id }) { word ->
-                        val inBook = if (showResults) vm.isInCurrentBook(word.id) else true
-                        BookWordRow(
-                            word = word,
-                            pluralStyle = vm.pluralStyle,
-                            inBook = inBook,
-                            showResults = showResults,
-                            onAdd = {
-                                book?.let { b -> vm.addWordsToBook(b.id, listOf(word)) }
-                            },
-                            onRemove = { vm.removeFromBook(word) }
-                        )
+                    if (!showResults) {
+                        items(vm.bookWords, key = { it.id }) { word ->
+                            BookWordRow(
+                                word = word,
+                                pluralStyle = vm.pluralStyle,
+                                action = BookRowAction.REMOVE,
+                                onAdd = {},
+                                onRemove = { onRemoveWord(word) }
+                            )
+                        }
+                    } else {
+                        if (inBookHits.isNotEmpty()) {
+                            item { GroupCaption("书里的词", inBookHits.size) }
+                            items(inBookHits, key = { "in-${it.id}" }) { word ->
+                                BookWordRow(
+                                    word = word,
+                                    pluralStyle = vm.pluralStyle,
+                                    action = BookRowAction.REMOVE,
+                                    onAdd = {},
+                                    onRemove = { onRemoveWord(word) }
+                                )
+                            }
+                        }
+                        if (others.isNotEmpty()) {
+                            item { GroupCaption("其他匹配，点 + 加入", others.size) }
+                            items(others, key = { "out-${it.id}" }) { word ->
+                                BookWordRow(
+                                    word = word,
+                                    pluralStyle = vm.pluralStyle,
+                                    action = BookRowAction.ADD,
+                                    onAdd = {
+                                        book?.let { b -> vm.addWordsToBook(b.id, listOf(word)) }
+                                    },
+                                    onRemove = {}
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -209,12 +259,36 @@ fun BookDetailScreen(vm: AppViewModel, onBack: () -> Unit) {
     }
 }
 
+/** 行尾的动作：移出本书 / 加入本书 / 已在本书 */
+private enum class BookRowAction { REMOVE, ADD, IN_BOOK }
+
+@Composable
+private fun GroupCaption(title: String, count: Int) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 4.dp, top = 6.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = title,
+            fontSize = 11.5.sp,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = " · $count",
+            fontSize = 11.5.sp,
+            color = MaterialTheme.colorScheme.outline
+        )
+    }
+}
+
 @Composable
 private fun BookWordRow(
     word: Word,
     pluralStyle: PluralStyle,
-    inBook: Boolean,
-    showResults: Boolean,
+    action: BookRowAction,
     onAdd: () -> Unit,
     onRemove: () -> Unit
 ) {
@@ -259,28 +333,8 @@ private fun BookWordRow(
                     )
                 }
             }
-            if (showResults) {
-                if (inBook) {
-                    Icon(
-                        Icons.Rounded.Check,
-                        contentDescription = "已在本书",
-                        modifier = Modifier
-                            .padding(horizontal = 10.dp)
-                            .size(18.dp),
-                        tint = ExtraColors.success.copy(alpha = 0.7f)
-                    )
-                } else {
-                    IconButton(onClick = onAdd) {
-                        Icon(
-                            Icons.Rounded.Add,
-                            contentDescription = "加入本书",
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-            } else {
-                IconButton(onClick = onRemove) {
+            when (action) {
+                BookRowAction.REMOVE -> IconButton(onClick = onRemove) {
                     Icon(
                         Icons.Rounded.Clear,
                         contentDescription = "移出本书",
@@ -288,6 +342,24 @@ private fun BookWordRow(
                         tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
                     )
                 }
+
+                BookRowAction.ADD -> IconButton(onClick = onAdd) {
+                    Icon(
+                        Icons.Rounded.Add,
+                        contentDescription = "加入本书",
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                BookRowAction.IN_BOOK -> Icon(
+                    Icons.Rounded.Check,
+                    contentDescription = "已在本书",
+                    modifier = Modifier
+                        .padding(horizontal = 10.dp)
+                        .size(18.dp),
+                    tint = ExtraColors.success.copy(alpha = 0.7f)
+                )
             }
         }
     }

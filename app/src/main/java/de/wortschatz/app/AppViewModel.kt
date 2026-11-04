@@ -1024,9 +1024,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun removeFromBook(word: Word) {
         val id = currentBookId ?: return
+        val bookName = currentBook?.name ?: "本书"
         viewModelScope.launch {
             withContext(Dispatchers.IO) { db.removeWordFromBook(id, word.id) }
             refresh()
+            // 移出后能撤销：搜出来再删的操作很容易点错，
+            // 撤销入口在设置页，标签里把书名列出来才好辨认是哪一步
+            offerUndo("从《$bookName》移出「${word.word}」") {
+                viewModelScope.launch {
+                    withContext(Dispatchers.IO) { db.addWordsToBook(id, listOf(word.id)) }
+                    refresh()
+                }
+            }
         }
     }
 
@@ -1044,6 +1053,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 db.search(text, ALL_LEVELS.toSet(), 40)
             }
             onResult(list)
+        }
+    }
+
+    /**
+     * 书内搜索：只在当前这本书里找，供「搜出来再移出」使用。
+     *
+     * 不复用 [searchForBook]：那是全库查询且有 40 条上限，用户书里几千词时，
+     * 目标词会被全库结果挤到 limit 之外——词明明在书里，却搜不到也就删不掉。
+     * 书内词表已在 [bookWords] 里，本地过滤既快又不会漏。
+     */
+    fun searchInCurrentBook(text: String): List<Word> {
+        val q = text.trim()
+        if (q.isEmpty()) return emptyList()
+        val folded = WordDb.foldUmlaut(q)
+        return bookWords.filter { w ->
+            w.word.contains(q, ignoreCase = true) ||
+                w.lemma.contains(q, ignoreCase = true) ||
+                w.zh.contains(q) ||
+                // 输入 Gemuese 也能搜到 Gemüse
+                WordDb.foldUmlaut(w.word).contains(folded)
         }
     }
 
