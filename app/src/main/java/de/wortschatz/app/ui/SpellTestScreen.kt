@@ -157,7 +157,11 @@ fun SpellTestScreen(vm: AppViewModel, onExit: () -> Unit) {
                     SpellFeedback(
                         word = word,
                         correct = vm.spellLastCorrect,
-                        pluralNote = word.pluralNote(vm.pluralStyle),
+                        // 要求写复数时正确答案里已经带了复数，下面再写一行就重复了
+                        pluralNote = if (vm.spellRequirePlural) null
+                        else word.pluralNote(vm.pluralStyle),
+                        requireArticle = vm.spellRequireArticle,
+                        requirePlural = vm.spellRequirePlural,
                         onSpeak = { vm.speakWord(word) }
                     )
                 }
@@ -264,6 +268,20 @@ private fun SpellQuestion(vm: AppViewModel, word: Word, modifier: Modifier = Mod
             color = MaterialTheme.colorScheme.outline
         )
 
+        // 开启「要求写冠词 / 复数」时给出书写格式，而不是把答案写出来。
+        // 名词以外的词性没有冠词与复数，不显示这行免得误导。
+        val needsExtra = word.pos == "n" &&
+            (vm.spellRequireArticle || (vm.spellRequirePlural && SpellTest.pluralOf(word) != null))
+        if (needsExtra) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "按格式写：${SpellTest.formatSample(vm.spellRequireArticle, vm.spellRequirePlural)}",
+                fontSize = 11.5.sp,
+                fontFamily = FontFamily.Default,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
+            )
+        }
+
         Spacer(Modifier.height(22.dp))
 
         OutlinedTextField(
@@ -274,7 +292,14 @@ private fun SpellQuestion(vm: AppViewModel, word: Word, modifier: Modifier = Mod
                 .fillMaxWidth()
                 .focusRequester(focusRequester),
             singleLine = true,
-            placeholder = { Text("输入德语拼写", fontSize = 14.sp) },
+            placeholder = {
+                Text(
+                    text = if (vm.spellRequireArticle || vm.spellRequirePlural)
+                        "如 ${SpellTest.formatSample(vm.spellRequireArticle, vm.spellRequirePlural)}"
+                    else "输入德语拼写",
+                    fontSize = 14.sp
+                )
+            },
             textStyle = androidx.compose.ui.text.TextStyle(
                 fontSize = 19.sp,
                 fontWeight = FontWeight.Medium,
@@ -340,6 +365,8 @@ private fun SpellFeedback(
     word: Word,
     correct: Boolean,
     pluralNote: String?,
+    requireArticle: Boolean = false,
+    requirePlural: Boolean = false,
     onSpeak: () -> Unit
 ) {
     Surface(
@@ -364,7 +391,8 @@ private fun SpellFeedback(
             Spacer(Modifier.width(8.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = if (correct) "拼写正确" else "正确答案：${SpellTest.answerOf(word)}",
+                    text = if (correct) "拼写正确"
+                    else "正确答案：${SpellTest.answerOf(word, requireArticle, requirePlural)}",
                     fontFamily = FontFamily.Default,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold,

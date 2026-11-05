@@ -400,6 +400,62 @@ fun SettingsScreen(
                         )
                     )
                 }
+
+                // 只对名词生效：动词、形容词没有冠词与复数。
+                // 拼写测试整体关掉时这两项没有意义，一并隐藏。
+                if (vm.spellTestEnabled) {
+                    Spacer(Modifier.height(6.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Spacer(Modifier.height(4.dp))
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "要求写冠词",
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "名词必须写出 der / die / das，漏写或写错算错",
+                                fontSize = 11.5.sp,
+                                lineHeight = 17.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = vm.spellRequireArticle,
+                            onCheckedChange = { vm.updateSpellRequireArticle(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                checkedTrackColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "要求写复数",
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "名词写成「单词, 复数」，如 der Hund, Hunde",
+                                fontSize = 11.5.sp,
+                                lineHeight = 17.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = vm.spellRequirePlural,
+                            onCheckedChange = { vm.updateSpellRequirePlural(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                checkedTrackColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                    }
+                }
             }
         }
 
@@ -741,7 +797,7 @@ fun SettingsScreen(
                     Spacer(Modifier.width(8.dp))
                     Column {
                         Text(
-                            text = "德语单词 Wortschatz 1.37",
+                            text = "德语单词 Wortschatz 1.38",
                             fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurface
                         )

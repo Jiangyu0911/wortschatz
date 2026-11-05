@@ -111,6 +111,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var spellTestEnabled by mutableStateOf(prefs.getBoolean(KEY_SPELL_TEST, true))
         private set
 
+    /** 拼写时是否要求写出名词冠词（der/die/das） */
+    var spellRequireArticle by mutableStateOf(prefs.getBoolean(KEY_SPELL_ARTICLE, false))
+        private set
+
+    /** 拼写时是否要求写出名词复数（逗号分隔，如 der Hund, Hunde） */
+    var spellRequirePlural by mutableStateOf(prefs.getBoolean(KEY_SPELL_PLURAL, false))
+        private set
+
     /** 复数展示：false = 完整形式（die Männer），true = 教材式词尾（¨-er） */
     var pluralSuffixOnly by mutableStateOf(prefs.getBoolean(KEY_PLURAL_SUFFIX, false))
         private set
@@ -903,7 +911,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (spellInput.isBlank()) return
         val w = spellWord ?: return
         val snapshot = spellSnapshot()
-        val ok = SpellTest.matches(spellInput, w)
+        val ok = SpellTest.check(spellInput, w, spellRequireArticle, spellRequirePlural)
         spellLastCorrect = ok
         spellChecked = true
         spellCheckedAt = System.currentTimeMillis()
@@ -1186,6 +1194,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun updateSpellTest(v: Boolean) {
         spellTestEnabled = v
         prefs.edit().putBoolean(KEY_SPELL_TEST, v).apply()
+    }
+
+    /** 拼写要求：名词必须写出冠词 */
+    fun updateSpellRequireArticle(v: Boolean) {
+        spellRequireArticle = v
+        prefs.edit().putBoolean(KEY_SPELL_ARTICLE, v).apply()
+    }
+
+    /** 拼写要求：名词必须写出复数 */
+    fun updateSpellRequirePlural(v: Boolean) {
+        spellRequirePlural = v
+        prefs.edit().putBoolean(KEY_SPELL_PLURAL, v).apply()
     }
 
     /** 切换复数展示方式：完整形式 / 教材式词尾 */
@@ -1572,6 +1592,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         private const val KEY_SPEED = "tts_speed"
         private const val KEY_THEME = "theme_mode"
         private const val KEY_SPELL_TEST = "spell_test"
+        private const val KEY_SPELL_ARTICLE = "spell_require_article"
+        private const val KEY_SPELL_PLURAL = "spell_require_plural"
         private const val KEY_PLURAL_SUFFIX = "plural_suffix_only"
         private const val KEY_BOOKS = "custom_books"
         private const val KEY_SEARCH_HISTORY = "search_history"
